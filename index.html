@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}</style>
+<title>Infinite Sudoku</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&family=Gochi+Hand&display=swap">
+<style>
+  /* Layout: a full-bleed canvas of endless ruled lines with a numbered gutter; a floating glass rail on top, a glass dock below, a ruled-paper verdict card. */
+  :root {
+    --void: #090d18;        /* the page at night */
+    --void-2: #0f1526;      /* raised glass */
+    --ink: #e9edf8;         /* primary text */
+    --dim: #5b6690;         /* other people's numbers, captions */
+    --faint: #39446a;       /* hairlines on glass */
+    --line: #222b47;        /* ruled lines */
+    --pen: #ff4f64;         /* teacher's red pen */
+    --pencil: #8fb4ff;      /* the player's digits */
+    --paper: #fbfaf6;       /* the verdict card */
+    --paper-ink: #1a1e2c;
+    --paper-rule: #dfe6f3;
+    --font-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --font-hand: "Gochi Hand", "Comic Sans MS", "Chalkboard SE", cursive;
+    --glass: color-mix(in srgb, var(--void-2) 72%, transparent);
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body { background: var(--void); color: var(--ink); font-family: var(--font-mono); overflow: hidden; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: text; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 50% 45%, transparent 55%, color-mix(in srgb, var(--void) 85%, transparent) 100%),
+      linear-gradient(var(--void), transparent 110px, transparent calc(100% - 130px), var(--void));
+  }
+  .glass {
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3);
+    border: 1px solid color-mix(in srgb, var(--faint) 70%, transparent);
+    box-shadow: 0 10px 40px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+
+  /* Top rail */
+  .rail {
+    position: fixed; left: 16px; right: 16px; top: calc(env(safe-area-inset-top, 0px) + 14px);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 8px 8px 8px 12px; border-radius: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .mark {
+    flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--pen); color: #fff; font: 700 17px var(--font-display); box-shadow: 0 4px 16px color-mix(in srgb, var(--pen) 45%, transparent);
+  }
+  h1 { margin: 0; font: 700 clamp(13px, 2vw, 16px) var(--font-display); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  h1 small { display: block; font: 400 10px var(--font-mono); color: var(--dim); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 2px; }
+  .stats { display: flex; align-items: center; gap: 6px; }
+  .stat { padding: 4px 12px; border-left: 1px solid var(--faint); line-height: 1.15; }
+  .stat span { display: block; font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+  .stat b { display: inline-block; font: 600 16px var(--font-mono); font-variant-numeric: tabular-nums; transition: color .3s; }
+  .stat b.bad { color: var(--pen); }
+  .stat b.bump { animation: bump .5s ease; }
+  @keyframes bump { 30% { transform: scale(1.25); } }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; cursor: pointer;
+    background: transparent; border: 1px solid var(--faint); color: var(--ink); margin-left: 6px;
+  }
+  .icon-btn:hover { background: color-mix(in srgb, var(--faint) 35%, transparent); }
+  .icon-btn svg { width: 18px; height: 18px; }
+  .icon-btn .off, .icon-btn[aria-pressed="true"] .on { display: none; }
+  .icon-btn[aria-pressed="true"] .off { display: block; }
+  .icon-btn[aria-pressed="true"] { color: var(--dim); }
+
+  /* Bottom dock */
+  .dock {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    width: min(560px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px;
+    padding: 8px 8px 8px 16px; border-radius: 16px; transition: opacity .35s, transform .35s;
+  }
+  .dock.away { opacity: 0; transform: translate(-50%, 20px); pointer-events: none; }
+  .keys { flex: 1; min-width: 0; display: flex; gap: 14px; font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+  .keys .count { color: var(--pencil); font-variant-numeric: tabular-nums; }
+  kbd {
+    font: 500 10px var(--font-mono); color: var(--ink); padding: 2px 6px; border-radius: 5px; margin-right: 4px;
+    border: 1px solid var(--faint); border-bottom-width: 2px; background: color-mix(in srgb, var(--void) 60%, transparent);
+  }
+  .check {
+    flex: none; display: flex; align-items: center; gap: 10px; cursor: pointer;
+    font: 600 13px var(--font-mono); color: #fff; background: var(--pen); border: 0; border-radius: 11px; padding: 11px 16px;
+    box-shadow: 0 6px 22px color-mix(in srgb, var(--pen) 40%, transparent); transition: transform .15s, filter .15s;
+  }
+  .check:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .check:active { transform: translateY(1px); }
+  .check kbd { color: #fff; border-color: rgba(255,255,255,.4); background: rgba(0,0,0,.12); margin: 0; }
+  .touch-only { display: none; }
+  @media (pointer: coarse) { .touch-only { display: inline; } .fine-only { display: none; } }
+  @media (max-width: 560px) { .stat:first-child { display: none; } h1 small { display: none; } }
+
+  /* Flight readout */
+  .hud {
+    position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 82px); transform: translateX(-50%);
+    width: min(420px, calc(100% - 32px)); padding: 12px 16px 14px; border-radius: 14px; text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .hud .dir { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--pen); }
+  .hud .coords { font: 500 13px var(--font-mono); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hud .coords em { font-style: normal; color: var(--dim); margin: 0 4px; }
+  .hud .track { height: 3px; border-radius: 3px; background: var(--line); margin-top: 10px; overflow: hidden; }
+  .hud .track i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--pencil), var(--pen)); border-radius: inherit; }
+
+  /* Verdict card: a sheet of ruled school paper */
+  .card {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    width: min(560px, calc(100% - 32px)); max-height: calc(100% - 140px); overflow: auto;
+    color: var(--paper-ink); border-radius: 10px; padding: 20px 22px 18px 52px;
+    background:
+      linear-gradient(90deg, transparent 36px, color-mix(in srgb, var(--pen) 55%, transparent) 36px 37.5px, transparent 37.5px),
+      repeating-linear-gradient(var(--paper) 0 25px, var(--paper-rule) 25px 26px),
+      var(--paper);
+    background-position: 0 0, 0 12px, 0 0;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    animation: slap 420ms cubic-bezier(.2,1.6,.4,1) both;
+  }
+  @keyframes slap { from { transform: translate(-50%, 40px) rotate(-4deg) scale(.9); opacity: 0; } }
+  .card .stamp { font-family: var(--font-hand); color: var(--pen); font-size: 36px; line-height: 1; transform: rotate(-2deg); display: inline-block; }
+  .card p { margin: 10px 0 0; font-size: 14px; line-height: 26px; max-width: 62ch; }
+  .card .big {
+    font: 12px/1.6 var(--font-mono); word-break: break-all; white-space: pre-wrap; color: #959aae;
+    background: color-mix(in srgb, var(--paper-rule) 45%, var(--paper)); border: 1px dashed var(--paper-rule);
+    border-radius: 6px; padding: 8px 10px; margin-top: 12px; max-height: 7.5em; overflow: auto;
+  }
+  .card .big mark { background: color-mix(in srgb, var(--pen) 12%, transparent); color: var(--pen); font-weight: 600; border-radius: 3px; padding: 0 1px; }
+  .card .penalty {
+    float: right; margin: -4px 0 8px 14px; width: 66px; height: 66px; border-radius: 50%; display: grid; place-items: center;
+    font: 400 26px var(--font-hand); color: var(--pen); border: 2.5px solid var(--pen); transform: rotate(8deg);
+  }
+  .card .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .card button {
+    font: 600 13px var(--font-mono); padding: 10px 16px; border-radius: 9px; cursor: pointer;
+    border: 1.5px solid var(--paper-ink); background: var(--paper-ink); color: var(--paper); transition: transform .15s;
+  }
+  .card button:hover { transform: translateY(-1px); }
+  .card button.ghost { background: transparent; color: var(--paper-ink); }
+
+  .toast {
+    position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%) rotate(-3deg);
+    font-family: var(--font-hand); font-size: clamp(36px, 7vw, 64px); color: var(--pen);
+    pointer-events: none; text-shadow: 0 6px 40px rgba(0,0,0,.9); animation: pop .3s cubic-bezier(.2,1.6,.4,1) both;
+  }
+  @keyframes pop { from { transform: translate(-50%, -50%) rotate(-3deg) scale(.6); opacity: 0; } }
+  button:focus-visible { outline: 2px solid var(--pencil); outline-offset: 2px; }
+  .card button:focus-visible { outline-color: var(--pen); }
+  .sr { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; }
+  @media (prefers-reduced-motion: reduce) { .card, .toast, .stat b.bump { animation: none; } }
+</style>
+</head>
+<body>
+
+<canvas id="cv" aria-label="Endless ruled number lines"></canvas>
+<div class="vignette"></div>
+
+<header class="rail glass">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">∞</div>
+    <h1>Infinite Sudoku<small>Every number. Somewhere.</small></h1>
+  </div>
+  <div class="stats">
+    <div class="stat"><span>Score</span><b id="score">0</b></div>
+    <div class="stat"><span>Mistakes</span><b id="mistakes">0</b></div>
+    <button class="icon-btn" id="mute" type="button" aria-pressed="false" aria-label="Mute sound">
+      <svg class="on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      <svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="dock glass" id="dock">
+  <div class="keys">
+    <span class="fine-only"><kbd>click</kbd>pick a spot</span>
+    <span class="fine-only"><kbd>0–9</kbd>write</span>
+    <span class="fine-only"><kbd>⌫</kbd>erase</span>
+    <span class="touch-only">Tap anywhere to write · drag to move</span>
+    <span class="count" id="count">0 digits</span>
+  </div>
+  <button class="check" id="check" type="button">Submit <kbd class="fine-only">⏎</kbd></button>
+</div>
+
+<input class="sr" id="kb" type="text" inputmode="numeric" autocomplete="off" aria-label="Your number">
+<div class="hud glass" id="hud" hidden><div class="dir" id="hud-dir"></div><div class="coords" id="hud-coords"></div><div class="track"><i id="hud-bar"></i></div></div>
+<div class="toast" id="toast" hidden></div>
+<section class="card" id="card" role="dialog" aria-live="assertive" hidden></section>
+
+<script>
+(() => {
+  const QUIPS = [
+    "Lines are a social construct.",
+    "On an infinite page, every number has been written before. Usually by someone more careful.",
+    "The rules say no repeats. They never said where.",
+    "I checked with the Sudoku Council. They're on my side.",
+    "That's exactly what someone who made a silly mistake would say.",
+    "Originality was never an option here, sweetie."
+  ];
+  const OPENERS = ["Umm, actually?", "Ahem.", "Oh no. Oh no no no.", "Bless your heart.", "Sweetie…", "Copycat."];
+
+  const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  const $ = id => document.getElementById(id);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // World units: one digit column = 1 wide, one ruled row = ROW tall. Row r sits between y = r*ROW and (r+1)*ROW.
+  const ROW = 2, BLANK = 40; // rows |r| <= BLANK are your clean notebook; everything else is already full.
+  let state = { entries: [], current: "", caret: { x: 0, r: 0 }, score: 0, mistakes: 0, muted: false, wonOnce: false, found: [] };
+  let busy = false, target = null, flight = null;
+  let W = 0, H = 0, dpr = 1, cam = { x: 0, y: 0, s: 22 }, view = null;
+
+  // ---------- hashing ----------
+  const TWO32 = 4294967296;
+  function mix(a) { a ^= a >>> 16; a = Math.imul(a, 0x7feb352d); a ^= a >>> 15; a = Math.imul(a, 0x846ca68b); a ^= a >>> 16; return a >>> 0; }
+  function hash(x, y, k) {
+    const xh = Math.floor(x / TWO32) | 0, yh = Math.floor(y / TWO32) | 0;
+    return mix((x | 0) ^ mix(xh ^ mix((y | 0) ^ mix(yh ^ mix(k + 0x51ed27)))));
+  }
+  const NB_W = 5000; // your clean notebook: rows |r| <= BLANK, columns |x| < NB_W
+  const inNotebook = (x, r) => Math.abs(r) <= BLANK && Math.abs(x) < NB_W;
+  const rowFilled = r => hash(0, r, 3) % 5 < 2; // about 60% of lines are empty
+  function numSeed(num, k) {
+    let h = mix(k * 7919 + num.length);
+    for (let i = 0; i < num.length; i++) h = mix(h ^ (num.charCodeAt(i) + i * 131));
+    return h;
+  }
+  // Matches you've been shown stay written where they were found, so a later trip past them still sees them.
+  let foundByRow = new Map();
+  function remember(t) {
+    if (!state.found.some(f => f.x === t.x && f.r === t.r && f.num === t.num)) state.found.push({ x: t.x, r: t.r, num: t.num });
+    indexFound();
+  }
+  function indexFound() {
+    foundByRow = new Map();
+    for (const f of state.found) { if (!foundByRow.has(f.r)) foundByRow.set(f.r, []); foundByRow.get(f.r).push(f); }
+  }
+  function digitAt(x, r) {
+    const fr = foundByRow.get(r);
+    if (fr) for (const f of fr) {
+      if (x >= f.x && x < f.x + f.num.length) return f.num[x - f.x];
+      if (x >= f.x - SLOT && x < slotEnd(f.x + f.num.length) + SLOT) return " ";
+    }
+    if (target && target.axis !== "self" && r === target.r && x >= target.x && x < target.x + target.num.length) return target.num[x - target.x];
+    if (inNotebook(x, r) || !rowFilled(r)) return " ";
+    // Filled lines hold separate numbers with gaps: one per 32-column stretch, sometimes none.
+    if (target && r === target.r && x >= target.x - SLOT && x < slotEnd(target.x + target.num.length) + SLOT) return " ";
+    const len = slotLen(Math.floor(x / SLOT), r), off = x - Math.floor(x / SLOT) * SLOT;
+    if (off >= len) return " ";
+    return String(off === 0 ? 1 + hash(x, r, 1) % 9 : hash(x, r, 1) % 10);
+  }
+  // Numbers sit in fixed 32-column slots, left-aligned like your own, with room to spare so none touch.
+  const SLOT = 32, slotEnd = x => Math.ceil(x / SLOT) * SLOT;
+  function slotLen(slot, r) { const h = hash(slot, r, 2); return h % 3 === 0 ? 0 : 2 + (h >>> 8) % 20; }
+
+  // ---------- camera ----------
+  const homeS = () => Math.min(26, Math.max(16, W / 34));
+  function homeCam() { return { x: view.x, y: view.y, s: homeS() }; }
+  function clampView() {
+    view.x = Math.min(NB_W, Math.max(-NB_W, view.x));
+    view.y = Math.min(BLANK * ROW, Math.max(-BLANK * ROW, view.y));
+  }
+  // Nudge the view just enough to keep the caret (and what you're typing) on screen.
+  function keepCaretInView() {
+    const s = homeS(), hw = W / 2 / s, hh = H / 2 / s, c = state.caret;
+    const x0 = c.x, x1 = c.x + state.current.length + 1, cy = c.r * ROW + ROW / 2;
+    if (x1 > view.x + hw - 40 / s) view.x = x1 - hw + 40 / s;
+    if (x0 < view.x - hw + 150 / s) view.x = x0 + hw - 150 / s;
+    if (cy < view.y - hh + 120 / s) view.y = cy + hh - 120 / s;
+    if (cy > view.y + hh - 140 / s) view.y = cy - hh + 140 / s;
+    clampView();
+  }
+  const entryAt = (x, r) => state.entries.find(e => e.r === r && x >= e.x - 1 && x < e.x + e.num.length + 8);
+  function makeFlight(from, to) {   // van Wijk & Nuij smooth zoom: out, across, back in
+    const rho = 1.41, dx = to.x - from.x, dy = to.y - from.y, u1 = Math.hypot(dx, dy);
+    const w0 = W / from.s, w1 = W / to.s;
+    if (u1 < 1e-6) {
+      const S = Math.abs(Math.log(w1 / w0)) / rho || 0.001;
+      return { S, at: s => ({ x: to.x, y: to.y, s: W / (w0 * Math.exp(Math.log(w1 / w0) * s / S)) }) };
+    }
+    const r2 = rho * rho, r4 = r2 * r2;
+    const b0 = (w1 * w1 - w0 * w0 + r4 * u1 * u1) / (2 * w0 * r2 * u1);
+    const b1 = (w1 * w1 - w0 * w0 - r4 * u1 * u1) / (2 * w1 * r2 * u1);
+    const R0 = -Math.asinh(b0), R1 = -Math.asinh(b1), S = (R1 - R0) / rho;
+    const c0 = Math.cosh(R0), s0 = Math.sinh(R0);
+    return {
+      S,
+      at(s) {
+        const u = w0 / r2 * (c0 * Math.tanh(rho * s + R0) - s0);
+        return { x: from.x + dx * u / u1, y: from.y + dy * u / u1, s: W / (w0 * c0 / Math.cosh(rho * s + R0)) };
+      }
+    };
+  }
+  function fly(to, maxMs, done, hud) {
+    const f = makeFlight(cam, to);
+    // Every trip takes 0.2s longer than the last one. Forever.
+    const ms = (reduced ? 900 : Math.min(maxMs, Math.max(1200, f.S * 240))) + 200 * (state.trips = (state.trips || 0) + 1) - 200;
+    flight = { f, to, t0: performance.now(), ms, done, hud };
+    whooshStart();
+  }
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+  // ---------- audio ----------
+  let ac = null;
+  function audio() {
+    if (state.muted) return null;
+    try { ac = ac || new (window.AudioContext || window.webkitAudioContext)(); if (ac.state === "suspended") ac.resume(); } catch { ac = null; }
+    return ac;
+  }
+  function honk() {
+    const a = audio(); if (!a) return;
+    [0, 0.26].forEach(off => {
+      const t = a.currentTime + off, o = a.createOscillator(), o2 = a.createOscillator(), g = a.createGain(), f = a.createBiquadFilter();
+      o.type = "square"; o2.type = "sawtooth";
+      o.frequency.setValueAtTime(330, t); o.frequency.exponentialRampToValueAtTime(520, t + 0.08);
+      o2.frequency.setValueAtTime(335, t); o2.frequency.exponentialRampToValueAtTime(528, t + 0.08);
+      f.type = "bandpass"; f.frequency.value = 900; f.Q.value = 1.2;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(f); o2.connect(f); f.connect(g); g.connect(a.destination);
+      o.start(t); o2.start(t); o.stop(t + 0.25); o2.stop(t + 0.25);
+    });
+  }
+  // Wrong-answer buzzer: two short, flat "bee bee" beeps.
+  function buzz() {
+    const a = audio(); if (!a) return;
+    [0, 0.2].forEach(off => {
+      const t = a.currentTime + 0.05 + off, o = a.createOscillator(), g = a.createGain(), f = a.createBiquadFilter();
+      o.type = "square"; o.frequency.value = 220;
+      f.type = "lowpass"; f.frequency.value = 1400;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+      g.gain.setValueAtTime(0.18, t + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      o.connect(f); f.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.17);
+    });
+  }
+  // Whoosh: looping noise through a band-pass whose loudness follows how fast the zoom is changing
+  // and whose pitch follows the zoom level, so zooming out sweeps down and zooming back in sweeps up.
+  let whoosh = null, noiseBuf = null;
+  function whooshStart() {
+    const a = audio(); if (!a) return;
+    whooshStop();
+    if (!noiseBuf) {
+      noiseBuf = a.createBuffer(1, a.sampleRate * 2, a.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    src.buffer = noiseBuf; src.loop = true;
+    f.type = "bandpass"; f.Q.value = 1.1; f.frequency.value = 1800; g.gain.value = 0;
+    src.connect(f); f.connect(g); g.connect(a.destination); src.start();
+    whoosh = { a, src, f, g, ls: Math.log(cam.s), t: performance.now() };
+  }
+  function whooshUpdate(now) {
+    if (!whoosh) return;
+    const ls = Math.log(cam.s), dt = Math.max(0.008, (now - whoosh.t) / 1000);
+    const rate = Math.abs(ls - whoosh.ls) / dt;
+    const level = Math.min(1, Math.max(0, (ls + 18) / 21));          // 0 = far out, 1 = home zoom
+    const at = whoosh.a.currentTime;
+    whoosh.g.gain.setTargetAtTime(Math.min(0.32, rate * 0.05), at, 0.05);
+    whoosh.f.frequency.setTargetAtTime(160 * Math.pow(2, level * 4.4), at, 0.05);
+    whoosh.ls = ls; whoosh.t = now;
+  }
+  function whooshStop() {
+    if (!whoosh) return;
+    const { a, src, g } = whoosh, at = a.currentTime;
+    g.gain.cancelScheduledValues(at); g.gain.setTargetAtTime(0, at, 0.12); src.stop(at + 0.7);
+    whoosh = null;
+  }
+  function tick() {
+    const a = audio(); if (!a) return;
+    const t = a.currentTime, o = a.createOscillator(), g = a.createGain();
+    o.type = "triangle"; o.frequency.value = 1500 + Math.random() * 300;
+    g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
+    o.connect(g); g.connect(a.destination); o.start(t); o.stop(t + 0.05);
+  }
+
+  // ---------- drawing ----------
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let C = {}, monoRatio = 0.6;
+  const MONO = '"IBM Plex Mono", ui-monospace, Consolas, monospace', HAND = '"Gochi Hand", "Comic Sans MS", cursive';
+  function readColors() { C = { void: css("--void"), ink: css("--ink"), dim: css("--dim"), line: css("--line"), pen: css("--pen"), pencil: css("--pencil") }; }
+  function measureMono() { ctx.font = `400 100px ${MONO}`; monoRatio = ctx.measureText("0").width / 100 || 0.6; }
+  const monoFont = (s, w = 400) => `${w} ${s / monoRatio}px ${MONO}`; // font size where one digit is exactly s px wide
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    if (!view) { const s = homeS(); view = { x: -84 / s + W / 2 / s, y: ROW / 2 - (H * 0.08) / s }; }
+    if (!flight && !target) { keepCaretInView(); cam = homeCam(); }
+  }
+  const sx = x => (x - cam.x) * cam.s + W / 2, sy = y => (y - cam.y) * cam.s + H / 2;
+  const baseline = r => sy((r + 1) * ROW) - cam.s * 0.35;
+
+  function drawLines() {
+    const left = cam.x - W / 2 / cam.s, right = cam.x + W / 2 / cam.s;
+    const top = cam.y - H / 2 / cam.s, bottom = cam.y + H / 2 / cam.s;
+    // Pure horizontal rules, nested by powers of ten as you zoom out.
+    for (let k = 0, B = ROW; k < 16; k++, B *= 10) {
+      const px = B * cam.s;
+      if (px < 5) continue;
+      if (px > H * 6) break;
+      ctx.strokeStyle = C.line; ctx.globalAlpha = Math.min(1, (px - 5) / 40); ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let y = Math.floor(top / B) * B; y <= bottom + B; y += B) { const Y = Math.round(sy(y)) + .5; ctx.moveTo(0, Y); ctx.lineTo(W, Y); }
+      ctx.stroke();
+
+      // From far away, full rows read as smudges of ink sitting on the lines.
+      // Only for the finest visible level, and only before real digits take over.
+      if (px >= 12 && cam.s < 4 && (k === 0 || ROW * Math.pow(10, k - 1) * cam.s < 12)) {
+        const a = Math.min(1, (px - 12) / 30) * 0.3 * Math.min(1, (4 - cam.s) / 1.5);
+        ctx.fillStyle = C.dim; ctx.globalAlpha = a; ctx.beginPath();
+        if (k === 0 && SLOT * cam.s >= 3) {
+          // Exact: one bar per real number, in its slot.
+          for (let r = Math.floor(top / ROW) - 1; r <= Math.ceil(bottom / ROW); r++) {
+            if (!rowFilled(r)) continue;
+            for (let sl = Math.floor(left / SLOT); sl * SLOT <= right; sl++) {
+              if (inNotebook(sl * SLOT, r)) continue;
+              if (target && r === target.r && sl * SLOT >= target.x - SLOT && sl * SLOT < slotEnd(target.x + target.num.length) + SLOT) continue;
+              const len = slotLen(sl, r); if (!len) continue;
+              ctx.rect(sx(sl * SLOT), sy((r + 1) * ROW) - px * 0.45, len * cam.s, px * 0.3);
+            }
+          }
+        } else {
+          const chunk = B * 16;
+          for (let y = Math.floor(top / B) * B; y <= bottom + B; y += B) {
+            const ri = Math.round(y / B);
+            for (let x = Math.floor(left / chunk) * chunk; x <= right; x += chunk) {
+              if (Math.abs(y / ROW) <= BLANK + 1 && Math.abs(x) < NB_W) continue;
+              const h = hash(Math.round(x / chunk), ri, k);
+              if (h % 5 < 3) continue;
+              ctx.rect(sx(x), sy(y + B) - px * 0.45, chunk * cam.s * (0.3 + (h % 30) / 100), px * 0.3);
+            }
+          }
+        }
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Everyone else's numbers, digit by digit, once they're big enough to read.
+    if (cam.s >= 4) {
+      ctx.font = monoFont(cam.s); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      ctx.fillStyle = C.dim; ctx.globalAlpha = Math.min(1, (cam.s - 4) / 6) * 0.8;
+      const x0 = Math.floor(left), x1 = Math.ceil(right);
+      for (let r = Math.floor(top / ROW) - 1; r <= Math.ceil(bottom / ROW); r++) {
+        if ((inNotebook(x0, r) && inNotebook(x1, r)) || (!rowFilled(r) && !(target && r === target.r) && !foundByRow.has(r))) continue;
+        let s = ""; for (let x = x0; x <= x1; x++) s += digitAt(x, r);
+        ctx.fillText(s, sx(x0), baseline(r));
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawGutter() {
+    const rowPx = ROW * cam.s;
+    if (rowPx < 14) return;
+    const g = ctx.createLinearGradient(0, 0, 150, 0);
+    g.addColorStop(0, C.void); g.addColorStop(0.55, C.void); g.addColorStop(1, "rgba(9,13,24,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 150, H);
+    ctx.font = `500 10px ${MONO}`; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.globalAlpha = Math.min(1, (rowPx - 14) / 20);
+    const top = cam.y - H / 2 / cam.s, bottom = cam.y + H / 2 / cam.s;
+    for (let r = Math.floor(top / ROW); r <= Math.ceil(bottom / ROW); r++) {
+      const mine = !target && r === state.caret.r;
+      ctx.fillStyle = mine ? C.pencil : (target && r === target.r ? C.pen : C.dim);
+      ctx.fillText(fmt(r + 1).padStart(4, "0"), 16, baseline(r));
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawNotebook(now) {
+    const s = cam.s;
+    if (s < 3) return;
+    if (!busy) {
+      const yT = sy(state.caret.r * ROW), yB = sy((state.caret.r + 1) * ROW);
+      const g = ctx.createLinearGradient(0, 0, W, 0);
+      g.addColorStop(0, "rgba(143,180,255,0)"); g.addColorStop(0.1, "rgba(143,180,255,0.07)"); g.addColorStop(1, "rgba(143,180,255,0)");
+      ctx.fillStyle = g; ctx.fillRect(0, yT + 1, W, yB - yT - 1);
+    }
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    state.entries.forEach(({ x, r, num, ok }) => {
+      const y = baseline(r), x0 = sx(x), w = num.length * s;
+      if (y < -s * 3 || y > H + s * 3 || x0 > W || x0 + w + s * 8 < 0) return;
+      ctx.font = monoFont(s, 600);
+      if (ok) {
+        ctx.fillStyle = C.ink; ctx.fillText(num, x0, y);
+        ctx.fillStyle = C.dim; ctx.font = monoFont(s * 0.7); ctx.fillText("✓", x0 + w + s * 0.6, y);
+        return;
+      }
+      ctx.fillStyle = C.pen; ctx.fillText(num, x0, y);
+      ctx.strokeStyle = C.pen; ctx.lineWidth = Math.max(1, s / 14);
+      ctx.beginPath(); ctx.ellipse(x0 + w / 2, y - s * 0.55, w / 2 + s * 0.7, s * 0.95, -0.02, 0.2, Math.PI * 2.1); ctx.stroke();
+      ctx.font = `400 ${s * 1.3}px ${HAND}`; ctx.fillText("silly!", x0 + w + s * 1.2, y);
+    });
+    const r = state.caret.r, y = baseline(r), x0 = sx(state.caret.x);
+    ctx.font = monoFont(s, 600); ctx.fillStyle = C.pencil;
+    ctx.fillText(state.current, x0, y);
+    if (!busy && Math.floor(now / 530) % 2 === 0) {
+      ctx.fillRect(x0 + state.current.length * s + 2, y - s * 1.35, Math.max(2, s / 10), s * 1.55);
+    }
+  }
+
+  function drawTarget(now) {
+    if (!target) return;
+    const s = cam.s, len = target.num.length, x = sx(target.x), w = len * s;
+    const yTop = sy(target.r * ROW), yBot = sy((target.r + 1) * ROW);
+    if (x > W + 50 || x + w < -50 || yBot < -50 || yTop > H + 50) return;
+    const pulse = 0.5 + 0.5 * Math.sin(now / 160), col = C.pen;
+    const bx = x - s * 0.3, by = yTop + (yBot - yTop) * 0.12, bw = w + s * 0.6, bh = (yBot - yTop) * 0.82;
+    ctx.fillStyle = C.void; ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.shadowColor = col; ctx.shadowBlur = 10 + pulse * 18;
+    ctx.strokeRect(bx, by, bw, bh); ctx.shadowBlur = 0;
+    if (s >= 3) { ctx.font = monoFont(s, 600); ctx.fillStyle = target.axis === "self" ? C.ink : C.pen; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillText(target.num, x, baseline(target.r)); }
+    // Bobbing arrow over the visible middle of the match
+    const ax = Math.min(Math.max((Math.max(bx, 0) + Math.min(bx + bw, W)) / 2, 40), W - 40);
+    const A = 58, tip = by - 10 + Math.sin(now / 200) * 8;
+    ctx.fillStyle = col; ctx.beginPath();
+    ctx.moveTo(ax, tip); ctx.lineTo(ax - A * .5, tip - A * .55); ctx.lineTo(ax - A * .2, tip - A * .55);
+    ctx.lineTo(ax - A * .2, tip - A * 1.3); ctx.lineTo(ax + A * .2, tip - A * 1.3); ctx.lineTo(ax + A * .2, tip - A * .55);
+    ctx.lineTo(ax + A * .5, tip - A * .55); ctx.closePath(); ctx.fill();
+    ctx.textAlign = "center"; ctx.font = `400 30px ${HAND}`; ctx.fillText(target.axis === "self" ? "you already did this one." : "already here.", ax, tip - A * 1.3 - 14);
+  }
+
+  function frame(now) {
+    if (flight) {
+      const t = Math.min(1, (now - flight.t0) / flight.ms);
+      cam = t >= 1 ? { ...flight.to } : flight.f.at(flight.f.S * ease(t));
+      if (flight.hud) updateHud(t);
+      whooshUpdate(now);
+      if (t >= 1) { const d = flight.done; flight = null; whooshStop(); d && d(); }
+    } else if (!busy) {
+      const h = homeCam(); cam.x += (h.x - cam.x) * 0.25; cam.y += (h.y - cam.y) * 0.25; cam.s = h.s;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.void; ctx.fillRect(0, 0, W, H);
+    drawLines(); drawNotebook(now); drawTarget(now); drawGutter();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- UI ----------
+  const fmt = n => Math.round(n).toLocaleString("en-US");
+  function updateHud(t) {
+    const k = Math.max(0, Math.round(Math.log10(H / cam.s / ROW)));
+    $("hud-bar").style.width = (t * 100).toFixed(1) + "%";
+    const dir = !target ? "" : target.axis === "self" ? "checking your own page" : target.axis === "v" ? (target.r > state.caret.r ? "↓ scanning down the column" : "↑ scanning up the column") : (target.x > 0 ? "→ scanning right along your line" : "← scanning left along your line");
+    $("hud-dir").textContent = dir;
+    $("hud-coords").innerHTML = `Line ${fmt(cam.y / ROW + 1)}<em>·</em>Col ${fmt(cam.x)}<em>·</em>1:10<sup>${k}</sup>`;
+  }
+  function renderStats() {
+    const sc = state.score.toLocaleString("en-US").replace("-", "\u2212");
+    for (const [id, v] of [["score", sc], ["mistakes", String(state.mistakes)]]) {
+      const el = $(id); if (el.textContent !== v) { el.textContent = v; el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
+    }
+    $("score").classList.toggle("bad", state.score < 0);
+    $("mute").setAttribute("aria-pressed", String(state.muted));
+    $("mute").setAttribute("aria-label", state.muted ? "Turn sound on" : "Mute sound");
+  }
+  function setPad() { $("dock").classList.toggle("away", busy); $("check").disabled = busy; syncCount(); }
+  function syncCount() { const n = state.current.length; $("count").textContent = `${fmt(n)} digit${n === 1 ? "" : "s"}`; kb.value = state.current; }
+  function toast(text, ms) {
+    const t = $("toast"); t.textContent = text; t.hidden = false;
+    return new Promise(r => setTimeout(() => { t.hidden = true; r(); }, ms));
+  }
+
+  function type(str) {
+    if (busy) return;
+    const d = str.replace(/\D/g, ""); if (!d) return;
+    state.current += d; audio(); tick(); syncCount(); keepCaretInView();
+  }
+  function erase() { if (!busy) { state.current = state.current.slice(0, -1); syncCount(); } }
+
+  async function submit() {
+    if (busy) return;
+    if (!state.current) { toast("write something first.", 900); return; }
+    audio();
+    if (!state.wonOnce && state.entries.length === 2) { // third guess: quietly correct. Once.
+      state.wonOnce = true; state.score += 10; renderStats(); tick();
+      commit(true);
+      return;
+    }
+    busy = true; setPad();
+    const num = state.current;
+    await toast(["hmm.", "hold on.", "wait a second…", "that looks familiar."][Math.floor(Math.random() * 4)], 900);
+    // Straight along the grid: either down/up the same column, or further along your own line.
+    // Seeded by the number itself, so the same number is always found the same way: either on one fixed
+    // far-off line (straight up/down your column) or at one fixed far-off column (straight along your line).
+    const h1 = numSeed(num, 1), h2 = numSeed(num, 2), h3 = numSeed(num, 3);
+    const way = ["up", "down", "left", "right"][h1 % 4], sign = way === "up" || way === "left" ? -1 : 1;
+    const dist = Math.floor((1e10 + (h2 % 89000) * 1e6 + h3 % 1e6) / SLOT) * SLOT;
+    const here = { ...cam }, c = state.caret, right = state.entries.find(e => e.ok && e.num === num && (e.r === c.r || e.x === c.x)); // same number in the same row or column as your correct one, sudoku-style
+    target = right ? { axis: "self", x: right.x, r: right.r, num: right.num }
+      : way === "up" || way === "down"
+      ? { axis: "v", x: c.x, r: sign * dist, num }
+      : { axis: "h", x: sign * dist, r: c.r, num };
+    const to = { x: here.x + (target.x - c.x), y: here.y + (target.r - c.r) * ROW, s: here.s };
+    $("hud").hidden = false;
+    fly(to, right ? 2600 : 9000, () => {
+      $("hud").hidden = true;
+      if (!right) remember(target);
+      honk(); setTimeout(showVerdict, 650);
+    }, true);
+  }
+
+  function showVerdict() {
+    const t = target, len = t.num.length;
+    state.score -= 100; state.mistakes++; renderStats();
+    const before = Array.from({ length: 24 }, (_, i) => digitAt(t.x - 24 + i, t.r)).join("");
+    const after = Array.from({ length: 24 }, (_, i) => digitAt(t.x + len + i, t.r)).join("");
+    const shown = len > 400 ? t.num.slice(0, 180) + "…" + t.num.slice(-180) : t.num;
+    const card = $("card");
+    const body = t.axis === "self"
+      ? `<p>You already wrote the correct number. It's right here on line <b>${fmt(t.r + 1)}</b>: <b>${shown}</b>. There's only one per page. Silly mistake!</p>`
+      : `<p>${t.axis === "v"
+        ? `That number is already written <b>${fmt(Math.abs(t.r - state.caret.r))} lines ${t.r > state.caret.r ? "below" : "above"}</b> yours, in the exact same column.`
+        : `That number is already written further along your own line, <b>${fmt(Math.abs(t.x - state.caret.x))} columns</b> to the ${t.x > state.caret.x ? "right" : "left"}.`}
+        ${len > 1 ? `All ${len} digits, in order.` : "It's right there."} Silly mistake!</p>
+      <div class="big">…${before}<mark>${shown}</mark>${after}…</div>`;
+    card.innerHTML = `
+      <span class="penalty">−100</span>
+      <span class="stamp">${OPENERS[Math.floor(Math.random() * OPENERS.length)]}</span>
+      ${body}
+      <div class="actions">
+        <button type="button" id="sorry">Sorry. Take me home</button>
+        <button type="button" class="ghost" id="argue">I wrote it first</button>
+      </div>`;
+    card.hidden = false;
+    buzz(); duck(0.12);
+    $("sorry").focus(); $("sorry").onclick = goHome;
+    $("argue").onclick = () => {
+      state.score -= 50; renderStats();
+      card.innerHTML = `
+        <span class="penalty">−50</span>
+        <span class="stamp">Arguing with the page.</span>
+        <p>${QUIPS[Math.floor(Math.random() * QUIPS.length)]} Another 50 points off for attitude.</p>
+        <div class="actions"><button type="button" id="sorry">Fine. Sorry</button></div>`;
+      honk();
+      $("sorry").focus(); $("sorry").onclick = goHome;
+    };
+  }
+
+  function commit(ok) {
+    const c = state.caret;
+    state.entries.push({ x: c.x, r: c.r, num: state.current, ok });
+    state.current = ""; syncCount();
+    if (c.r < BLANK && !entryAt(c.x, c.r + 1)) state.caret = { x: c.x, r: c.r + 1 };
+    keepCaretInView();
+  }
+  function goHome() {
+    duck(0.45);
+    $("card").hidden = true;
+    commit(false);
+    fly(homeCam(), target && target.axis === "self" ? 2600 : 9000, () => { target = null; busy = false; setPad(); });
+  }
+
+  // Typing: physical keys anywhere, or the phone keyboard through a hidden field the page focuses on tap.
+  const kb = $("kb");
+  $("check").onclick = submit;
+  let drag = null;
+  cv.addEventListener("pointerdown", e => {
+    if (busy) return;
+    drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false };
+    try { cv.setPointerCapture(e.pointerId); } catch {}
+  });
+  cv.addEventListener("pointermove", e => {
+    if (!drag || busy) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.hypot(dx, dy) > 6) drag.moved = true;
+    if (drag.moved) { view.x = drag.vx - dx / homeS(); view.y = drag.vy - dy / homeS(); clampView(); }
+  });
+  cv.addEventListener("pointerup", e => {
+    const d = drag; drag = null;
+    if (!d || d.moved || busy) return;
+    const x = Math.floor((e.clientX - W / 2) / cam.s + cam.x), r = Math.floor(((e.clientY - H / 2) / cam.s + cam.y) / ROW);
+    if (!inNotebook(x, r)) toast("that part's taken.", 800);
+    else if (entryAt(x, r)) toast("already graded.", 800);
+    else { state.caret = { x, r }; keepCaretInView(); }
+    kb.focus({ preventScroll: true });
+  });
+  cv.addEventListener("pointercancel", () => { drag = null; });
+  cv.addEventListener("wheel", e => {
+    if (busy) return;
+    e.preventDefault();
+    const s = homeS();
+    view.x += (e.shiftKey ? e.deltaY : e.deltaX) / s; view.y += (e.shiftKey ? 0 : e.deltaY) / s; clampView();
+  }, { passive: false });
+  function moveCaret(dx, dr) {
+    const c = state.caret, n = { x: c.x + dx, r: c.r + dr };
+    if (inNotebook(n.x, n.r)) { state.caret = n; keepCaretInView(); }
+  }
+  const ARROWS = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  kb.addEventListener("input", () => {
+    if (busy) { kb.value = state.current; return; }
+    const v = kb.value.replace(/\D/g, "");
+    if (v.length > state.current.length) { audio(); tick(); }
+    state.current = v; syncCount(); keepCaretInView();
+  });
+  $("mute").onclick = () => { state.muted = !state.muted; renderStats(); music(); };
+  addEventListener("keydown", e => {
+    if (e.target.closest && e.target.closest(".card")) return;
+    if (!busy && ARROWS[e.key]) { moveCaret(...ARROWS[e.key]); e.preventDefault(); return; }
+    if (e.target === kb) { if (e.key === "Enter") { submit(); e.preventDefault(); } return; }
+    if (/^[0-9]$/.test(e.key)) { type(e.key); e.preventDefault(); }
+    else if (e.key === "Backspace" || e.key === "Delete") { erase(); e.preventDefault(); }
+    else if (e.key === "Enter") { submit(); e.preventDefault(); }
+  });
+  addEventListener("paste", e => {
+    if (e.target === kb) return; type((e.clipboardData || window.clipboardData).getData("text") || ""); e.preventDefault(); });
+  addEventListener("resize", resize);
+
+  // Background music: starts on the first key or tap (browsers block autoplay), follows the sound toggle, ducks under the buzzer.
+  const bgm = new Audio("infinite-pain.mp3");
+  bgm.loop = true; bgm.volume = 0.45;
+  function music() {
+    if (state.muted) bgm.pause();
+    else bgm.play().catch(() => {});
+  }
+  function duck(v) {
+    const from = bgm.volume, t0 = performance.now();
+    const step = now => { const t = Math.min(1, (now - t0) / 600); bgm.volume = from + (v - from) * t; if (t < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+  addEventListener("pointerdown", music, { once: true });
+  addEventListener("keydown", music, { once: true });
+
+  function start(saved) {
+    if (saved && Array.isArray(saved.entries)) {
+      state = { ...state, ...saved };
+      state.entries = state.entries.map((e, i) => typeof e === "string" ? { x: 0, r: i, num: e, ok: false } : e);
+      if (!saved.caret) state.caret = { x: 0, r: state.entries.length };
+      if (!Array.isArray(state.found)) state.found = [];
+      indexFound();
+    }
+    readColors(); measureMono(); resize(); renderStats(); setPad();
+    document.fonts && document.fonts.ready.then(measureMono);
+    requestAnimationFrame(frame);
+  }
+  window.claude?.hot?.snapshot?.(() => ({ ...state }));
+  window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+})();
+</script>
+</body>
+</html>
